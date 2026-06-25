@@ -61,6 +61,18 @@ fi
 # CUDA 환경 변수 설정
 echo "Using CUDA device: $CUDA_VISIBLE_DEVICES"
 
+# Link custom LoRAs / models from the attached Network Volume (if present)
+if [ -d /runpod-volume/loras ]; then
+    echo "Linking Network-Volume LoRAs into ComfyUI..."
+    mkdir -p /ComfyUI/models/loras
+    ln -sf /runpod-volume/loras/* /ComfyUI/models/loras/ 2>/dev/null || true
+    ls -la /ComfyUI/models/loras/ || true
+fi
+if [ -d /runpod-volume/models ]; then
+    mkdir -p /ComfyUI/models/diffusion_models
+    ln -sf /runpod-volume/models/* /ComfyUI/models/diffusion_models/ 2>/dev/null || true
+fi
+
 # Start ComfyUI in the background
 echo "Starting ComfyUI in the background..."
 python /ComfyUI/main.py --listen --use-sage-attention &

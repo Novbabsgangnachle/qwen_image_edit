@@ -207,6 +207,36 @@ def save_base64_to_file(base64_data, temp_dir, output_filename):
         logger.error(f"❌ Base64 디코딩 실패: {e}")
         raise Exception(f"Base64 디코딩 실패: {e}")
 
+def inject_lora(prompt, lora_input):
+    """Stack user LoRA(s) on top of the existing (Lightning) LoraLoaderModelOnly node.
+    lora_input: ["name.safetensors", weight]  OR  [["name", w], ...].
+    LoRA files must be in ComfyUI/models/loras (entrypoint symlinks the Network Volume)."""
+    if not lora_input:
+        return
+    pairs = [lora_input] if isinstance(lora_input[0], str) else lora_input
+    base = next((nid for nid, n in prompt.items()
+                 if n.get("class_type") == "LoraLoaderModelOnly"), None)
+    if base is None:
+        logger.warning("No LoraLoaderModelOnly node in workflow; skipping LoRA injection")
+        return
+    consumers = [(nid, k) for nid, n in prompt.items()
+                 for k, v in n.get("inputs", {}).items()
+                 if isinstance(v, list) and len(v) == 2 and str(v[0]) == str(base)]
+    prev = str(base)
+    new_id = 90001
+    for entry in pairs:
+        name, weight = (entry[0], entry[1]) if isinstance(entry, (list, tuple)) else (entry, 1.0)
+        prompt[str(new_id)] = {"class_type": "LoraLoaderModelOnly",
+                               "inputs": {"lora_name": name,
+                                          "strength_model": float(weight),
+                                          "model": [prev, 0]}}
+        logger.info(f"Injected LoRA {name} (w={weight}) as node {new_id} after node {prev}")
+        prev = str(new_id)
+        new_id += 1
+    for cid, k in consumers:
+        prompt[cid]["inputs"][k] = [prev, 0]
+
+
 def handler(job):
     job_input = job.get("input", {})
 
@@ -263,6 +293,10 @@ def handler(job):
         prompt[_NODE_WIDTH]["inputs"]["value"] = job_input["width"]
     if _NODE_HEIGHT in prompt and "height" in job_input:
         prompt[_NODE_HEIGHT]["inputs"]["value"] = job_input["height"]
+
+    # Custom LoRA(s) stacked on top of the baked Lightning LoRA.
+    if job_input.get("lora"):
+        inject_lora(prompt, job_input["lora"])
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
     logger.info(f"Connecting to WebSocket: {ws_url}")
